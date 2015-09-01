@@ -3,16 +3,15 @@ package proximity_test
 import (
 	"math"
 	"math/rand"
-	"testing"
-
 	"sort"
+	"testing"
 
 	"github.com/davidreynolds/gos2/s2"
 	"github.com/stretchr/testify/assert"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/taik/geo-benchmark/s2"
 )
 
 func newInMemoryDB() (*leveldb.DB, error) {
@@ -20,50 +19,98 @@ func newInMemoryDB() (*leveldb.DB, error) {
 	return leveldb.Open(storage, &opt.Options{})
 }
 
+func newProximity() (*proximity.Proximity, error) {
+	db, err := newInMemoryDB()
+	if err != nil {
+		return nil, err
+	}
+	return proximity.New(db), nil
+}
+
+func TestAddLatLng(t *testing.T) {
+	points := []s2.LatLng{
+		s2.LatLngFromDegrees(40.724153, -73.992610), // nw
+		s2.LatLngFromDegrees(40.720533, -73.994144), // sw
+		s2.LatLngFromDegrees(40.722190, -73.986226), // ne
+	}
+
+	p, err := newProximity()
+	assert.NoError(t, err)
+
+	for _, ll := range points {
+		assert.NoError(t, p.AddLatlng(ll))
+
+		key := []byte(s2.CellIDFromLatLng(ll).ToToken())
+
+		has, err := p.DB.Has(key, &opt.ReadOptions{})
+		assert.NoError(t, err)
+		assert.True(t, has)
+
+		value, err := p.DB.Get(key, &opt.ReadOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, []byte{}, value)
+	}
+}
+
 func TestProximitySearch(t *testing.T) {
 	points := []s2.LatLng{
-		s2.LatLngFromDegrees(40.724153, -73.992610), // NW
-		s2.LatLngFromDegrees(40.720533, -73.994144), // SW
-		s2.LatLngFromDegrees(40.722190, -73.986226), // NE
+		s2.LatLngFromDegrees(40.724153, -73.992610), // nw
+		s2.LatLngFromDegrees(40.720533, -73.994144), // sw
+		s2.LatLngFromDegrees(40.722190, -73.986226), // ne
 		// Should not be included
 		s2.LatLngFromDegrees(40.717009, -73.983234), // SE
 	}
 
-	tokens := make([]string, 0, len(points))
+	expectedCellIDs := []s2.CellID{
+		s2.CellIDFromLatLng(s2.LatLngFromDegrees(40.724153, -73.992610)), // nw
+		s2.CellIDFromLatLng(s2.LatLngFromDegrees(40.720533, -73.994144)), // sw
+		s2.CellIDFromLatLng(s2.LatLngFromDegrees(40.722190, -73.986226)), // ne
+	}
 
-	db, err := newInMemoryDB()
+	p, err := newProximity()
 	assert.NoError(t, err)
 
-	for _, ll := range points {
-		cell := s2.CellIDFromLatLng(ll)
+	p.AddLatLngs(points)
 
-		token := []byte(cell.ToToken())
-		tokens = append(tokens, string(token))
-		db.Put(token, token, &opt.WriteOptions{})
+	p0 := s2.LatLngFromDegrees(40.719657, -73.996632) // SW
+	p1 := s2.LatLngFromDegrees(40.723353, -73.984014) // NE
+
+	gotCellIDs := p.Search(p0, p1)
+
+	expected := make([]int, 0, len(expectedCellIDs))
+	for _, cell := range expectedCellIDs {
+		expected = append(expected, int(cell))
 	}
 
-	bb := s2.RectFromPointPair(
-		s2.LatLngFromDegrees(40.719657, -73.996632), // SW
-		s2.LatLngFromDegrees(40.723353, -73.984014), // NE
-	)
-
-	start := s2.CellIDFromLatLng(bb.Hi()).ToToken()
-	end := s2.CellIDFromLatLng(bb.Lo()).ToToken()
-
-	iter := db.NewIterator(&util.Range{Start: []byte(start), Limit: []byte(end)}, nil)
-
-	got := make([]string, 0, len(points))
-	for iter.Next() {
-		token := string(iter.Value())
-		got = append(got, token)
+	got := make([]int, 0, len(gotCellIDs))
+	for _, cell := range gotCellIDs {
+		got = append(got, int(cell))
 	}
 
-	iter.Release()
+	sort.Ints(expected)
+	sort.Ints(got)
 
-	sort.Strings(tokens[0:3])
-	sort.Strings(got)
-	assert.Equal(t, tokens[0:3], got)
-	assert.NotContains(t, tokens[3], got)
+	assert.Equal(t, expected, got, "Should contain the first three points")
+}
+
+func TestProximityMatch(t *testing.T) {
+	points := []s2.LatLng{
+		s2.LatLngFromDegrees(40.724153, -73.992610), // nw
+		s2.LatLngFromDegrees(40.720533, -73.994144), // sw
+		s2.LatLngFromDegrees(40.722190, -73.986226), // ne
+		// Should not be included
+		s2.LatLngFromDegrees(40.717009, -73.983234), // SE
+	}
+
+	p, err := newProximity()
+	assert.NoError(t, err)
+
+	p.AddLatLngs(points)
+
+	p0 := s2.LatLngFromDegrees(40.719657, -73.996632) // SW
+	p1 := s2.LatLngFromDegrees(40.723353, -73.984014) // NE
+
+	assert.True(t, p.Match(p0, p1))
 }
 
 func generateLatLng(x0, y0 float64, radius int) s2.LatLng {
@@ -87,34 +134,22 @@ func generateLatLng(x0, y0 float64, radius int) s2.LatLng {
 func benchmarkProximitySearch(b *testing.B, elemCount int) {
 	b.StopTimer()
 
-	db, _ := newInMemoryDB()
+	p, _ := newProximity()
 
 	centerLat, centerLng := 40.724153, -73.992610
 
 	for i := 0; i < elemCount; i++ {
 		ll := generateLatLng(centerLat, centerLng, 10)
-		cell := s2.CellIDFromLatLng(ll)
-		token := []byte(cell.ToToken())
-		db.Put(token, token, &opt.WriteOptions{})
+		p.AddLatlng(ll)
 	}
 
-	bb := s2.RectFromPointPair(
-		s2.LatLngFromDegrees(40.719657, -73.996632), // SW
-		s2.LatLngFromDegrees(40.723353, -73.984014), // NE
-	)
-
-	start := s2.CellIDFromLatLng(bb.Hi()).ToToken()
-	end := s2.CellIDFromLatLng(bb.Lo()).ToToken()
+	p0 := s2.LatLngFromDegrees(40.719657, -73.996632) // SW
+	p1 := s2.LatLngFromDegrees(40.723353, -73.984014) // NE
 
 	b.StartTimer()
+
 	for i := 0; i < b.N; i++ {
-		iter := db.NewIterator(&util.Range{Start: []byte(start), Limit: []byte(end)}, nil)
-
-		for iter.Next() {
-			iter.Value()
-		}
-
-		iter.Release()
+		p.Search(p0, p1)
 	}
 }
 
@@ -128,4 +163,38 @@ func BenchmarkProximitySearch_100K(b *testing.B) {
 
 func BenchmarkProximitySearch_1M(b *testing.B) {
 	benchmarkProximitySearch(b, 1000000)
+}
+
+func benchmarkProximityMatch(b *testing.B, elemCount int) {
+	b.StopTimer()
+
+	p, _ := newProximity()
+
+	centerLat, centerLng := 40.724153, -73.992610
+
+	for i := 0; i < elemCount; i++ {
+		ll := generateLatLng(centerLat, centerLng, 10)
+		p.AddLatlng(ll)
+	}
+
+	p0 := s2.LatLngFromDegrees(40.719657, -73.996632) // SW
+	p1 := s2.LatLngFromDegrees(40.723353, -73.984014) // NE
+
+	b.StartTimer()
+
+	for i := 0; i < b.N; i++ {
+		p.Match(p0, p1)
+	}
+}
+
+func BenchmarkProximityMatch_1K(b *testing.B) {
+	benchmarkProximityMatch(b, 1000)
+}
+
+func BenchmarkProximityMatch_100K(b *testing.B) {
+	benchmarkProximityMatch(b, 100000)
+}
+
+func BenchmarkProximityMatch_1M(b *testing.B) {
+	benchmarkProximityMatch(b, 1000000)
 }
