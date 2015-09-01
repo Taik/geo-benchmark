@@ -126,7 +126,6 @@ func BenchmarkProximitySearch_100K(b *testing.B) {
 	benchmarkProximitySearch(b, 100000)
 }
 
-
 func BenchmarkProximitySearch_1M(b *testing.B) {
 	benchmarkProximitySearch(b, 1000000)
 }

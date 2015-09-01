@@ -10,8 +10,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
-
-	"github.com/taik/geo-test/geohash"
+	"github.com/taik/geo-benchmark/geohash"
 )
 
 func newInMemoryDB() (*leveldb.DB, error) {

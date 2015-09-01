@@ -8,7 +8,7 @@ import (
 	"github.com/davidreynolds/gos2/s2"
 	"github.com/nick11roberts/geozip"
 	"github.com/stretchr/testify/assert"
-	"github.com/taik/geo-test"
+	"github.com/taik/geo-benchmark/basic"
 )
 
 var topLeft = s2.LatLngFromDegrees(40.755534, -74.001743)
