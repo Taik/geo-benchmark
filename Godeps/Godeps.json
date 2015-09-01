@@ -1,0 +1,59 @@
+{
+	"ImportPath": "github.com/taik/geo-benchmark",
+	"GoVersion": "go1.5",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/TomiHiltunen/geohash-golang",
+			"Rev": "b3e4e625abfb033eb0ae83c0566afcea2f138206"
+		},
+		{
+			"ImportPath": "github.com/davidreynolds/gos2/exactfloat",
+			"Rev": "d21eee5e333604b7cd1852a668ca2854c3ed16e7"
+		},
+		{
+			"ImportPath": "github.com/davidreynolds/gos2/r1",
+			"Rev": "d21eee5e333604b7cd1852a668ca2854c3ed16e7"
+		},
+		{
+			"ImportPath": "github.com/davidreynolds/gos2/r2",
+			"Rev": "d21eee5e333604b7cd1852a668ca2854c3ed16e7"
+		},
+		{
+			"ImportPath": "github.com/davidreynolds/gos2/r3",
+			"Rev": "d21eee5e333604b7cd1852a668ca2854c3ed16e7"
+		},
+		{
+			"ImportPath": "github.com/davidreynolds/gos2/s1",
+			"Rev": "d21eee5e333604b7cd1852a668ca2854c3ed16e7"
+		},
+		{
+			"ImportPath": "github.com/davidreynolds/gos2/s2",
+			"Rev": "d21eee5e333604b7cd1852a668ca2854c3ed16e7"
+		},
+		{
+			"ImportPath": "github.com/golang/snappy",
+			"Rev": "723cc1e459b8eea2dea4583200fd60757d40097a"
+		},
+		{
+			"ImportPath": "github.com/nick11roberts/geozip",
+			"Comment": "v1.0-1-g470484a",
+			"Rev": "470484af7a6006574b5e297b6dd26d5fb31437a0"
+		},
+		{
+			"ImportPath": "github.com/shopspring/decimal",
+			"Rev": "9995dc92ee7e30b8567b1e9f192459c16f327e12"
+		},
+		{
+			"ImportPath": "github.com/stretchr/testify/assert",
+			"Comment": "v1.0-21-gf552045",
+			"Rev": "f5520455607c0233cb6d7b056f71b22c1d265ef1"
+		},
+		{
+			"ImportPath": "github.com/syndtr/goleveldb/leveldb",
+			"Rev": "1a9d62f03ea92815b46fcaab357cfd4df264b1a0"
+		}
+	]
+}

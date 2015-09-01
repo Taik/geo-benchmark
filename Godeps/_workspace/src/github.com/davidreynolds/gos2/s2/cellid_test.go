@@ -1,0 +1,537 @@
+package s2
+
+import (
+	"sort"
+	"testing"
+
+	"github.com/davidreynolds/gos2/r2"
+	"github.com/davidreynolds/gos2/s1"
+)
+
+func TestCellIDFromFace(t *testing.T) {
+	for face := 0; face < 6; face++ {
+		fpl := CellIDFromFacePosLevel(face, 0, 0)
+		f := CellIDFromFace(face)
+		if fpl != f {
+			t.Errorf("CellIDFromFacePosLevel(%d, 0, 0) != CellIDFromFace(%d), got %v wanted %v", face, face, f, fpl)
+		}
+	}
+}
+
+func TestParentChildRelationships(t *testing.T) {
+	ci := CellIDFromFacePosLevel(3, 0x12345678, maxLevel-4)
+
+	if !ci.IsValid() {
+		t.Errorf("CellID %v should be valid", ci)
+	}
+	if f := ci.Face(); f != 3 {
+		t.Errorf("ci.Face() is %v, want 3", f)
+	}
+	if p := ci.Pos(); p != 0x12345700 {
+		t.Errorf("ci.Pos() is 0x%X, want 0x12345700", p)
+	}
+	if l := ci.Level(); l != 26 { // 26 is maxLevel - 4
+		t.Errorf("ci.Level() is %v, want 26", l)
+	}
+	if ci.IsLeaf() {
+		t.Errorf("CellID %v should not be a leaf", ci)
+	}
+
+	if kid2 := ci.ChildBeginAtLevel(ci.Level() + 2).Pos(); kid2 != 0x12345610 {
+		t.Errorf("child two levels down is 0x%X, want 0x12345610", kid2)
+	}
+	if kid0 := ci.ChildBegin().Pos(); kid0 != 0x12345640 {
+		t.Errorf("first child is 0x%X, want 0x12345640", kid0)
+	}
+	if kid0 := ci.Children()[0].Pos(); kid0 != 0x12345640 {
+		t.Errorf("first child is 0x%X, want 0x12345640", kid0)
+	}
+	if parent := ci.immediateParent().Pos(); parent != 0x12345400 {
+		t.Errorf("ci.immediateParent().Pos() = 0x%X, want 0x12345400", parent)
+	}
+	if parent := ci.Parent(ci.Level() - 2).Pos(); parent != 0x12345000 {
+		t.Errorf("ci.Parent(l-2).Pos() = 0x%X, want 0x12345000", parent)
+	}
+
+	if uint64(ci.ChildBegin()) >= uint64(ci) {
+		t.Errorf("ci.ChildBegin() is 0x%X, want < 0x%X", ci.ChildBegin(), ci)
+	}
+	if uint64(ci.ChildEnd()) <= uint64(ci) {
+		t.Errorf("ci.ChildEnd() is 0x%X, want > 0x%X", ci.ChildEnd(), ci)
+	}
+	if ci.ChildEnd() != ci.ChildBegin().Next().Next().Next().Next() {
+		t.Errorf("ci.ChildEnd() is 0x%X, want 0x%X", ci.ChildEnd(), ci.ChildBegin().Next().Next().Next().Next())
+	}
+	if ci.RangeMin() != ci.ChildBeginAtLevel(maxLevel) {
+		t.Errorf("ci.RangeMin() is 0x%X, want 0x%X", ci.RangeMin(), ci.ChildBeginAtLevel(maxLevel))
+	}
+	if ci.RangeMax().Next() != ci.ChildEndAtLevel(maxLevel) {
+		t.Errorf("ci.RangeMax().Next() is 0x%X, want 0x%X", ci.RangeMax().Next(), ci.ChildEndAtLevel(maxLevel))
+	}
+}
+
+func TestContainment(t *testing.T) {
+	a := CellID(0x80855c0000000000) // Pittsburg
+	b := CellID(0x80855d0000000000) // child of a
+	c := CellID(0x80855dc000000000) // child of b
+	d := CellID(0x8085630000000000) // part of Pittsburg disjoint from a
+	tests := []struct {
+		x, y                                 CellID
+		xContainsY, yContainsX, xIntersectsY bool
+	}{
+		{a, a, true, true, true},
+		{a, b, true, false, true},
+		{a, c, true, false, true},
+		{a, d, false, false, false},
+		{b, b, true, true, true},
+		{b, c, true, false, true},
+		{b, d, false, false, false},
+		{c, c, true, true, true},
+		{c, d, false, false, false},
+		{d, d, true, true, true},
+	}
+	should := func(b bool) string {
+		if b {
+			return "should"
+		}
+		return "should not"
+	}
+	for _, test := range tests {
+		if test.x.Contains(test.y) != test.xContainsY {
+			t.Errorf("%v %s contain %v", test.x, should(test.xContainsY), test.y)
+		}
+		if test.x.Intersects(test.y) != test.xIntersectsY {
+			t.Errorf("%v %s intersect %v", test.x, should(test.xIntersectsY), test.y)
+		}
+		if test.y.Contains(test.x) != test.yContainsX {
+			t.Errorf("%v %s contain %v", test.y, should(test.yContainsX), test.x)
+		}
+	}
+
+	// TODO(dsymonds): Test Contains, Intersects better, such as with adjacent cells.
+}
+
+func TestContainment2(t *testing.T) {
+	parentMap := map[CellID]CellID{}
+	cells := []CellID{}
+	for face := 0; face < 6; face++ {
+		expandCell(t, CellIDFromFacePosLevel(face, 0, 0), &cells, parentMap)
+	}
+	for i := 0; i < len(cells); i++ {
+		for j := 0; j < len(cells); j++ {
+			contained := true
+			for id := cells[j]; id != cells[i]; id = parentMap[id] {
+				if _, ok := parentMap[id]; !ok {
+					contained = false
+					break
+				}
+			}
+			if got := cells[i].Contains(cells[j]); got != contained {
+				t.Fatalf("%v.Contains(%v) == %v, want %v", cells[i], cells[j], got, contained)
+			}
+			if got := cells[j] >= cells[i].RangeMin() && cells[j] <= cells[i].RangeMax(); got != contained {
+				t.Fatalf("want %v, got %v", contained, got)
+			}
+			if cells[i].Intersects(cells[j]) != (cells[i].Contains(cells[j]) || cells[j].Contains(cells[i])) {
+				t.Fatalf("%v.Intersects(%v) != (%v.Contains(%v) || %v.Contains(%v))",
+					cells[i], cells[j], cells[i], cells[j], cells[j], cells[i])
+			}
+		}
+	}
+}
+
+const maxExpandLevel = 3
+
+func expandCell(t *testing.T, parent CellID, cells *[]CellID, parentMap map[CellID]CellID) {
+	*cells = append(*cells, parent)
+	if parent.Level() == maxExpandLevel {
+		return
+	}
+	face, _, _, orientation := parent.faceIJOrientation()
+	if face != parent.Face() {
+		t.Errorf("%v != %v", face, parent.Face())
+	}
+
+	child := parent.ChildBegin()
+	for pos := 0; child != parent.ChildEnd(); pos, child = pos+1, child.Next() {
+		if parent.Child(pos) != child {
+			t.Errorf("%v.child(%v) != %v", parent, pos, child)
+		}
+		if child.Level() != parent.Level()+1 {
+			t.Errorf("%v.Level() != %v.Level+1", child, parent)
+		}
+		if child.IsLeaf() {
+			t.Errorf("%v.IsLeaf()", child)
+		}
+		childFace, _, _, childOrientation := child.faceIJOrientation()
+		if childFace != face {
+			t.Errorf("faces don't match: %v != %v", childFace, face)
+		}
+		if childOrientation != orientation^posToOrientation[pos] {
+			t.Errorf("orientations are wrong: %v, %v", childOrientation,
+				orientation^posToOrientation[pos])
+		}
+
+		parentMap[child] = parent
+		expandCell(t, child, cells, parentMap)
+	}
+}
+
+func TestCellIDString(t *testing.T) {
+	ci := CellID(0xbb04000000000000)
+	if s, exp := ci.String(), "5/31200"; s != exp {
+		t.Errorf("ci.String() = %q, want %q", s, exp)
+	}
+}
+
+func TestLatLng(t *testing.T) {
+	// You can generate these with the s2cellid2latlngtestcase C++ program in this directory.
+	tests := []struct {
+		id       CellID
+		lat, lng float64
+	}{
+		{0x47a1cbd595522b39, 49.703498679, 11.770681595},
+		{0x46525318b63be0f9, 55.685376759, 12.588490937},
+		{0x52b30b71698e729d, 45.486546517, -93.449700022},
+		{0x46ed8886cfadda85, 58.299984854, 23.049300056},
+		{0x3663f18a24cbe857, 34.364439040, 108.330699969},
+		{0x10a06c0a948cf5d, -30.694551352, -30.048758753},
+		{0x2b2bfd076787c5df, -25.285264027, 133.823116966},
+		{0xb09dff882a7809e1, -75.000000031, 0.000000133},
+		{0x94daa3d000000001, -24.694439215, -47.537363213},
+		{0x87a1000000000001, 38.899730392, -99.901813021},
+		{0x4fc76d5000000001, 81.647200334, -55.631712940},
+		{0x3b00955555555555, 10.050986518, 78.293170610},
+		{0x1dcc469991555555, -34.055420593, 18.551140038},
+		{0xb112966aaaaaaaab, -69.219262171, 49.670072392},
+	}
+	for _, test := range tests {
+		l1 := LatLngFromDegrees(test.lat, test.lng)
+		l2 := test.id.LatLng()
+		if l1.Distance(l2) > 1e-9*s1.Degree { // ~0.1mm on earth.
+			t.Errorf("LatLng() for CellID %x (%s) : got %s, want %s", uint64(test.id), test.id, l2, l1)
+		}
+		c1 := test.id
+		c2 := CellIDFromLatLng(l1)
+		if c1 != c2 {
+			t.Errorf("CellIDFromLatLng(%s) = %x (%s), want %s", l1, uint64(c2), c2, c1)
+		}
+	}
+}
+
+func TestEdgeNeighbors(t *testing.T) {
+	// Check the edge neighbors of face 1.
+	faces := []int{5, 3, 2, 0}
+	for i, nbr := range cellIDFromFaceIJ(1, 0, 0).Parent(0).EdgeNeighbors() {
+		if !nbr.isFace() {
+			t.Errorf("CellID(%d) is not a face", nbr)
+		}
+		if got, want := nbr.Face(), faces[i]; got != want {
+			t.Errorf("CellID(%d).Face() = %d, want %d", nbr, got, want)
+		}
+	}
+	// Check the edge neighbors of the corner cells at all levels.  This case is
+	// trickier because it requires projecting onto adjacent faces.
+	const maxIJ = maxSize - 1
+	for level := 1; level <= maxLevel; level++ {
+		id := cellIDFromFaceIJ(1, 0, 0).Parent(level)
+		// These neighbors were determined manually using the face and axis
+		// relationships.
+		levelSizeIJ := sizeIJ(level)
+		want := []CellID{
+			cellIDFromFaceIJ(5, maxIJ, maxIJ).Parent(level),
+			cellIDFromFaceIJ(1, levelSizeIJ, 0).Parent(level),
+			cellIDFromFaceIJ(1, 0, levelSizeIJ).Parent(level),
+			cellIDFromFaceIJ(0, maxIJ, 0).Parent(level),
+		}
+		for i, nbr := range id.EdgeNeighbors() {
+			if nbr != want[i] {
+				t.Errorf("CellID(%d).EdgeNeighbors()[%d] = %v, want %v", id, i, nbr, want[i])
+			}
+		}
+	}
+}
+
+func TestAppendVertexNeighbors(t *testing.T) {
+	var want CellID
+	nbrs := []CellID{}
+
+	// Check the vertex neighbors of the center of face 2 at level 5
+	cellIDFromPoint(PointFromCoords(0, 0, 1)).AppendVertexNeighbors(5, &nbrs)
+	sort.Sort(byID(nbrs))
+	for i := 0; i < 4; i++ {
+		ioff := 0
+		joff := 0
+		if i < 2 {
+			ioff = 1
+		}
+		if i == 0 || i == 3 {
+			joff = 1
+		}
+
+		want = cellIDFromFaceIJ(2, (1<<29)-ioff, (1<<29)-joff).Parent(5)
+		if nbrs[i] != want {
+			t.Errorf("%v != %v", nbrs[i], want)
+		}
+	}
+
+	nbrs = []CellID{}
+
+	// Check the vertex neighbors of the corner of faces 0, 4, and 5.
+	id := CellIDFromFacePosLevel(0, 0, maxLevel)
+	id.AppendVertexNeighbors(0, &nbrs)
+	sort.Sort(byID(nbrs))
+	if len(nbrs) != 3 {
+		t.Errorf("len(%v) == %d, want 3", nbrs, len(nbrs))
+	}
+
+	tests := []struct {
+		want CellID
+	}{
+		{CellIDFromFacePosLevel(0, 0, 0)},
+		{CellIDFromFacePosLevel(4, 0, 0)},
+		{CellIDFromFacePosLevel(5, 0, 0)},
+	}
+
+	for i, test := range tests {
+		if nbrs[i] != test.want {
+			t.Errorf("got %v, want %v", nbrs[i], want)
+		}
+	}
+}
+
+func removeDuplicates(a []CellID) []CellID {
+	res := []CellID{}
+	seen := map[CellID]bool{}
+	for _, c := range a {
+		if _, ok := seen[c]; !ok {
+			res = append(res, c)
+			seen[c] = true
+		}
+	}
+	return res
+}
+
+func TestAllNeighbors(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		id := randomCellID()
+		if id.IsLeaf() {
+			id = id.immediateParent()
+		}
+		maxDiff := min(6, maxLevel-id.Level()-1)
+		level := id.Level() + uniform(maxDiff)
+
+		var all, expected []CellID
+		id.AppendAllNeighbors(level, &all)
+		end := id.ChildEndAtLevel(level + 1)
+		for c := id.ChildBeginAtLevel(level + 1); c != end; c = c.Next() {
+			all = append(all, c.immediateParent())
+			c.AppendVertexNeighbors(level, &expected)
+		}
+		all = removeDuplicates(all)
+		expected = removeDuplicates(expected)
+		sort.Sort(byID(all))
+		sort.Sort(byID(expected))
+		if len(all) != len(expected) {
+			t.Errorf("len(%v) != len(%v)", all, expected)
+		}
+		for i := 0; i < len(all); i++ {
+			if all[i] != expected[i] {
+				t.Fatalf("%v != %v", all[i], expected[i])
+			}
+		}
+	}
+}
+
+func TestCoverage(t *testing.T) {
+	maxDist := 0.5 * MaxDiag.Value(maxLevel)
+	for i := 0; i < 1000000; i++ {
+		p := randomPoint()
+		q := Point{cellIDFromPoint(p).rawPoint()}
+		if p.Distance(q).Radians() > maxDist {
+			t.Errorf("%v.Distance(%v) > %v", p, q, maxDist)
+		}
+	}
+}
+
+func TestCellIDTokensNominal(t *testing.T) {
+	tests := []struct {
+		token string
+		id    CellID
+	}{
+		{"1", 0x1000000000000000},
+		{"3", 0x3000000000000000},
+		{"14", 0x1400000000000000},
+		{"41", 0x4100000000000000},
+		{"094", 0x0940000000000000},
+		{"537", 0x5370000000000000},
+		{"3fec", 0x3fec000000000000},
+		{"72f3", 0x72f3000000000000},
+		{"52b8c", 0x52b8c00000000000},
+		{"990ed", 0x990ed00000000000},
+		{"4476dc", 0x4476dc0000000000},
+		{"2a724f", 0x2a724f0000000000},
+		{"7d4afc4", 0x7d4afc4000000000},
+		{"b675785", 0xb675785000000000},
+		{"40cd6124", 0x40cd612400000000},
+		{"3ba32f81", 0x3ba32f8100000000},
+		{"08f569b5c", 0x08f569b5c0000000},
+		{"385327157", 0x3853271570000000},
+		{"166c4d1954", 0x166c4d1954000000},
+		{"96f48d8c39", 0x96f48d8c39000000},
+		{"0bca3c7f74c", 0x0bca3c7f74c00000},
+		{"1ae3619d12f", 0x1ae3619d12f00000},
+		{"07a77802a3fc", 0x07a77802a3fc0000},
+		{"4e7887ec1801", 0x4e7887ec18010000},
+		{"4adad7ae74124", 0x4adad7ae74124000},
+		{"90aba04afe0c5", 0x90aba04afe0c5000},
+		{"8ffc3f02af305c", 0x8ffc3f02af305c00},
+		{"6fa47550938183", 0x6fa4755093818300},
+		{"aa80a565df5e7fc", 0xaa80a565df5e7fc0},
+		{"01614b5e968e121", 0x01614b5e968e1210},
+		{"aa05238e7bd3ee7c", 0xaa05238e7bd3ee7c},
+		{"48a23db9c2963e5b", 0x48a23db9c2963e5b},
+	}
+	for _, test := range tests {
+		ci := CellIDFromToken(test.token)
+		if ci != test.id {
+			t.Errorf("CellIDFromToken(%q) = %x, want %x", test.token, uint64(ci), uint64(test.id))
+		}
+
+		token := ci.ToToken()
+		if token != test.token {
+			t.Errorf("ci.ToToken = %q, want %q", token, test.token)
+		}
+	}
+}
+
+func TestCellIDFromTokensErrorCases(t *testing.T) {
+	noneToken := CellID(0).ToToken()
+	if noneToken != "X" {
+		t.Errorf("CellID(0).Token() = %q, want X", noneToken)
+	}
+	noneID := CellIDFromToken(noneToken)
+	if noneID != CellID(0) {
+		t.Errorf("CellIDFromToken(%q) = %x, want 0", noneToken, uint64(noneID))
+	}
+	tests := []string{
+		"876b e99",
+		"876bee99\n",
+		"876[ee99",
+		" 876bee99",
+	}
+	for _, test := range tests {
+		ci := CellIDFromToken(test)
+		if uint64(ci) != 0 {
+			t.Errorf("CellIDFromToken(%q) = %x, want 0", test, uint64(ci))
+		}
+	}
+}
+
+func TestIJLevelToBoundUV(t *testing.T) {
+	maxIJ := 1<<maxLevel - 1
+
+	tests := []struct {
+		i     int
+		j     int
+		level int
+		want  r2.Rect
+	}{
+		// The i/j space is [0, 2^30 - 1) which maps to [-1, 1] for the
+		// x/y axes of the face surface. Results are scaled by the size of a cell
+		// at the given level. At level 0, everything is one cell of the full size
+		// of the space.  At maxLevel, the bounding rect is almost floating point
+		// noise.
+
+		// What should be out of bounds values, but passes the C++ code as well.
+		{
+			-1, -1, 0,
+			r2.RectFromPoints(r2.Point{-5, -5}, r2.Point{-1, -1}),
+		},
+		{
+			-1 * maxIJ, -1 * maxIJ, 0,
+			r2.RectFromPoints(r2.Point{-5, -5}, r2.Point{-1, -1}),
+		},
+		{
+			-1, -1, maxLevel,
+			r2.RectFromPoints(r2.Point{-1.0000000024835267, -1.0000000024835267},
+				r2.Point{-1, -1}),
+		},
+		{
+			0, 0, maxLevel + 1,
+			r2.RectFromPoints(r2.Point{-1, -1}, r2.Point{-1, -1}),
+		},
+
+		// Minimum i,j at different levels
+		{
+			0, 0, 0,
+			r2.RectFromPoints(r2.Point{-1, -1}, r2.Point{1, 1}),
+		},
+		{
+			0, 0, maxLevel / 2,
+			r2.RectFromPoints(r2.Point{-1, -1},
+				r2.Point{-0.999918621033430099, -0.999918621033430099}),
+		},
+		{
+			0, 0, maxLevel,
+			r2.RectFromPoints(r2.Point{-1, -1},
+				r2.Point{-0.999999997516473060, -0.999999997516473060}),
+		},
+
+		// Just a hair off the outer bounds at different levels.
+		{
+			1, 1, 0,
+			r2.RectFromPoints(r2.Point{-1, -1}, r2.Point{1, 1}),
+		},
+		{
+			1, 1, maxLevel / 2,
+			r2.RectFromPoints(r2.Point{-1, -1},
+				r2.Point{-0.999918621033430099, -0.999918621033430099}),
+		},
+		{
+			1, 1, maxLevel,
+			r2.RectFromPoints(r2.Point{-0.9999999975164731, -0.9999999975164731},
+				r2.Point{-0.9999999950329462, -0.9999999950329462}),
+		},
+
+		// Center point of the i,j space at different levels.
+		{
+			maxIJ / 2, maxIJ / 2, 0,
+			r2.RectFromPoints(r2.Point{-1, -1}, r2.Point{1, 1})},
+		{
+			maxIJ / 2, maxIJ / 2, maxLevel / 2,
+			r2.RectFromPoints(r2.Point{-0.000040691345930099, -0.000040691345930099},
+				r2.Point{0, 0})},
+		{
+			maxIJ / 2, maxIJ / 2, maxLevel,
+			r2.RectFromPoints(r2.Point{-0.000000001241763433, -0.000000001241763433},
+				r2.Point{0, 0})},
+
+		// Maximum i, j at different levels.
+		{
+			maxIJ, maxIJ, 0,
+			r2.RectFromPoints(r2.Point{-1, -1}, r2.Point{1, 1}),
+		},
+		{
+			maxIJ, maxIJ, maxLevel / 2,
+			r2.RectFromPoints(r2.Point{0.999918621033430099, 0.999918621033430099},
+				r2.Point{1, 1}),
+		},
+		{
+			maxIJ, maxIJ, maxLevel,
+			r2.RectFromPoints(r2.Point{0.999999997516473060, 0.999999997516473060},
+				r2.Point{1, 1}),
+		},
+	}
+
+	for _, test := range tests {
+		uv := ijLevelToBoundUV(test.i, test.j, test.level)
+		if !float64Eq(uv.X.Lo, test.want.X.Lo) ||
+			!float64Eq(uv.X.Hi, test.want.X.Hi) ||
+			!float64Eq(uv.Y.Lo, test.want.Y.Lo) ||
+			!float64Eq(uv.Y.Hi, test.want.Y.Hi) {
+			t.Errorf("ijLevelToBoundUV(%d, %d, %d), got %v, want %v",
+				test.i, test.j, test.level, uv, test.want)
+		}
+	}
+}
