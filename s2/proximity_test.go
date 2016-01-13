@@ -1,30 +1,52 @@
 package proximity_test
 
 import (
+	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
 	"testing"
 
-	"github.com/davidreynolds/gos2/s2"
+	"github.com/boltdb/bolt"
 	"github.com/stretchr/testify/assert"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/storage"
-	"github.com/taik/geo-benchmark/s2"
+	"github.com/stretchr/testify/require"
+	proximity "github.com/taik/geo-benchmark/s2"
+	"github.com/timehop/gos2/s2"
 )
 
-func newInMemoryDB() (*leveldb.DB, error) {
-	storage := storage.NewMemStorage()
-	return leveldb.Open(storage, &opt.Options{})
+// tempfile returns a temporary file path.
+// One of boltdb's test helper functions.
+func tempfile() string {
+	f, err := ioutil.TempFile("", "proximity-")
+	if err != nil {
+		panic(err)
+	}
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+	if err := os.Remove(f.Name()); err != nil {
+		panic(err)
+	}
+	return f.Name()
+}
+
+// mustOpenDB returns a new, open DB at a temporary location.
+func mustOpenDB() *bolt.DB {
+	db, err := bolt.Open(tempfile(), 0666, nil)
+	if err != nil {
+		panic(err)
+	}
+	return db
 }
 
 func newProximity() (*proximity.Proximity, error) {
-	db, err := newInMemoryDB()
+	db := mustOpenDB()
+	proximity, err := proximity.New(db)
 	if err != nil {
 		return nil, err
 	}
-	return proximity.New(db), nil
+	return proximity, nil
 }
 
 func TestAddLatLng(t *testing.T) {
@@ -35,20 +57,20 @@ func TestAddLatLng(t *testing.T) {
 	}
 
 	p, err := newProximity()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	for _, ll := range points {
 		assert.NoError(t, p.AddLatlng(ll))
 
 		key := []byte(s2.CellIDFromLatLng(ll).ToToken())
 
-		has, err := p.DB.Has(key, &opt.ReadOptions{})
-		assert.NoError(t, err)
-		assert.True(t, has)
-
-		value, err := p.DB.Get(key, &opt.ReadOptions{})
-		assert.NoError(t, err)
-		assert.Equal(t, []byte{}, value)
+		p.DB.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte("proximity"))
+			v := b.Get(key)
+			assert.NoError(t, err)
+			assert.Equal(t, []byte{}, v)
+			return nil
+		})
 	}
 }
 
@@ -68,7 +90,7 @@ func TestProximitySearch(t *testing.T) {
 	}
 
 	p, err := newProximity()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	p.AddLatLngs(points)
 

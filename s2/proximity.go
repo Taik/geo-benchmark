@@ -1,77 +1,92 @@
 package proximity
 
 import (
-	"github.com/davidreynolds/gos2/s2"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"bytes"
+
+	"github.com/boltdb/bolt"
+	"github.com/timehop/gos2/s2"
 )
 
 type Proximity struct {
-	DB *leveldb.DB
+	DB *bolt.DB
 }
 
-func New(db *leveldb.DB) *Proximity {
-	return &Proximity{DB: db}
+func New(db *bolt.DB) (*Proximity, error) {
+	err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("proximity"))
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Proximity{DB: db}, nil
 }
 
 func (p *Proximity) AddLatlng(point s2.LatLng) error {
 	cell := s2.CellIDFromLatLng(point)
 	token := []byte(cell.ToToken())
-	return p.DB.Put(token, []byte{}, &opt.WriteOptions{})
+
+	return p.DB.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("proximity"))
+		err := bucket.Put(token, []byte{})
+		return err
+	})
 }
 
 func (p *Proximity) AddLatLngs(points []s2.LatLng) error {
-	for _, ll := range points {
-		err := p.AddLatlng(ll)
-		if err != nil {
-			return err
+	var cell s2.CellID
+	var token []byte
+
+	return p.DB.Batch(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("proximity"))
+
+		for _, ll := range points {
+			cell = s2.CellIDFromLatLng(ll)
+			token = []byte(cell.ToToken())
+
+			err := bucket.Put(token, []byte{})
+			if err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (p *Proximity) Match(p0, p1 s2.LatLng) bool {
-	boundRect := s2.RectFromPointPair(p0, p1)
+	boundRect := s2.RectFromLatLng(p0)
+	boundRect = boundRect.AddPoint(p1)
 
 	startToken := []byte(s2.CellIDFromLatLng(boundRect.Hi()).ToToken())
 	endToken := []byte(s2.CellIDFromLatLng(boundRect.Lo()).ToToken())
 
-	iter := p.DB.NewIterator(
-		&util.Range{
-			Start: startToken,
-			Limit: endToken,
-		},
-		nil,
-	)
-	defer iter.Release()
-
-	for iter.Next() {
-		return true
-	}
-	return false
+	found := false
+	p.DB.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket([]byte("proximity")).Cursor()
+		for k, _ := cursor.Seek(startToken); k != nil && bytes.Compare(k, endToken) <= 0; k, _ = cursor.Next() {
+			found = true
+			break
+		}
+		return nil
+	})
+	return found
 }
 
 func (p *Proximity) Search(p0, p1 s2.LatLng) []s2.CellID {
-	boundRect := s2.RectFromPointPair(p0, p1)
+	boundRect := s2.RectFromLatLng(p0)
+	boundRect = boundRect.AddPoint(p1)
 
 	startToken := []byte(s2.CellIDFromLatLng(boundRect.Hi()).ToToken())
 	endToken := []byte(s2.CellIDFromLatLng(boundRect.Lo()).ToToken())
 
-	iter := p.DB.NewIterator(
-		&util.Range{
-			Start: startToken,
-			Limit: endToken,
-		},
-		nil,
-	)
-	defer iter.Release()
-
 	results := []s2.CellID{}
-
-	for iter.Next() {
-		cell := s2.CellIDFromToken(string(iter.Key()))
-		results = append(results, cell)
-	}
+	p.DB.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket([]byte("proximity")).Cursor()
+		for k, _ := cursor.Seek(startToken); k != nil && bytes.Compare(k, endToken) <= 0; k, _ = cursor.Next() {
+			cell := s2.CellIDFromToken(string(k))
+			results = append(results, cell)
+		}
+		return nil
+	})
 	return results
 }
