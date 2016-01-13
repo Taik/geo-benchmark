@@ -1,43 +1,30 @@
-hash: f1858603dd06c47e57b0ef33d9a81c517ff0f3cd0f8247b782c271a1f5ec98eb
-updated: 2016-01-13T11:15:32.999311425-05:00
+hash: e915817f40097a38d3f552da1eb880407f28a5f92b20d16355087f88c3784587
+updated: 2016-01-13T12:43:10.317757224-05:00
 imports:
+- name: github.com/boltdb/bolt
+  version: 4030e7fbc16465ec02334c93396b57629438096e
 - name: github.com/davidreynolds/gos2
   version: d21eee5e333604b7cd1852a668ca2854c3ed16e7
   subpackages:
-  - exactfloat
-  - r1
-  - r2
-  - r3
-  - s1
-  - s2
+  - /s2
 - name: github.com/golang/protobuf
   version: 2402d76f3d41f928c7902a765dfc872356dd3aad
-  repo: https://github.com/golang/protobuf
 - name: github.com/golang/snappy
   version: 723cc1e459b8eea2dea4583200fd60757d40097a
-- name: github.com/nick11roberts/geozip
-  version: 470484af7a6006574b5e297b6dd26d5fb31437a0
 - name: github.com/onsi/ginkgo
   version: e43390e35a4a88f3f95d5ddf9055efb7a1170469
-  repo: https://github.com/onsi/ginkgo
 - name: github.com/onsi/gomega
   version: 0fe204460da2c8fa1babcaac196e694de8f1aaa1
-  repo: https://github.com/onsi/gomega
-- name: github.com/shopspring/decimal
-  version: 9995dc92ee7e30b8567b1e9f192459c16f327e12
-- name: github.com/stretchr/objx
-  version: 1a9d0bb9f541897e62256577b352fdbc1fb4fd94
-  repo: https://github.com/stretchr/objx
-- name: github.com/stretchr/testify
-  version: f5520455607c0233cb6d7b056f71b22c1d265ef1
-  subpackages:
-  - assert
 - name: github.com/syndtr/goleveldb
-  version: 1a9d62f03ea92815b46fcaab357cfd4df264b1a0
+  version: 5acacf6e72d3aeaf26dd3d3f163c635d3ef1e6e6
   subpackages:
-  - leveldb
+  - /leveldb
   - leveldb/opt
   - leveldb/util
+- name: github.com/timehop/gos2
+  version: 004cde1d85c2ef02a66c6c769d44b293d28879f5
+  subpackages:
+  - /s2
 - name: github.com/TomiHiltunen/geohash-golang
   version: b3e4e625abfb033eb0ae83c0566afcea2f138206
 devImports: []
